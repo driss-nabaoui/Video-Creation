@@ -4,23 +4,24 @@ A Python tool designed to transcribe video/audio files with **exact word-level t
 
 ---
 
-## 🚀 Why this is fast on CPU
+## 🚀 Hardware Acceleration (Auto GPU & CPU)
 
-Standard Whisper (PyTorch) can be very slow on CPU. This script uses:
-1. **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** powered by **CTranslate2**, which is up to **4x faster than vanilla Whisper** on CPU with a much smaller memory footprint.
-2. **`int8` Quantization**: Runs weights in 8-bit precision, reducing CPU load while preserving transcription accuracy.
-3. **Voice Activity Detection (VAD) Filtering**: Automatically skips silent segments, eliminating unnecessary processing time.
-4. **Multi-threaded CPU execution**: Automatically uses all available CPU cores.
+This tool automatically detects and leverages your hardware:
+1. **NVIDIA GPU (CUDA)**: Automatically detected and used with `float16` precision for blazing fast transcription (typically **15x-30x real-time**).
+2. **CPU Fallback / Execution**: If no GPU is present (or if `--device cpu` is passed), it utilizes **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** with **CTranslate2**, `int8` quantization, and multi-threading across all CPU cores.
+3. **Voice Activity Detection (VAD) Filtering**: Automatically skips silence.
 
 ---
 
 ## 📁 Files Included
 
-- [transcribe.py](file:///C:/Users/AdMin/Documents/Video-Creation/transcribe.py): The main CLI transcription tool (auto-detects local files or YouTube URLs).
-- [youtube_api.py](file:///C:/Users/AdMin/Documents/Video-Creation/youtube_api.py): Instant YouTube transcript API fetcher (3 seconds for 50+ min videos).
-- [dynamic_captions.py](file:///C:/Users/AdMin/Documents/Video-Creation/dynamic_captions.py): Creates dynamic word-by-word captions with hugging background boxes, pop animation, and custom positions (no full lines).
-- [build_intro_video.py](file:///C:/Users/AdMin/Documents/Video-Creation/build_intro_video.py): Builds a teaser/introduction video with scene transitions and dynamic captions.
-- [video_tools.py](file:///C:/Users/AdMin/Documents/Video-Creation/video_tools.py): Video editing helper functions (clipping, searching words, burning animated subtitles).
+- [transcribe.py](transcribe.py): The main CLI transcription tool (auto-detects local files or YouTube URLs).
+- [youtube_api.py](youtube_api.py): Instant YouTube transcript API fetcher (3 seconds for 50+ min videos).
+- [dynamic_captions.py](dynamic_captions.py): Creates dynamic word-by-word captions with hugging background boxes, pop animation, and empty space placement.
+- [detect_empty_space.py](detect_empty_space.py): MediaPipe segmentation & Largest Empty Rectangle (LER) detector for clean background caption placement.
+- [depth_compositor.py](depth_compositor.py): Depth-layered video compositor placing text behind the speaker.
+- [build_intro_video.py](build_intro_video.py): Builds a teaser/introduction video with scene transitions and dynamic captions.
+- [video_tools.py](video_tools.py): Video editing helper functions (clipping, searching words, burning animated subtitles).
 
 ---
 
@@ -52,16 +53,132 @@ Options:
 - `--position`: `bottom` (lower-third), `center` (middle screen), `dynamic` (subtle alternating vertical bounce).
 - `--no-pop`: Disable the 15% spring pop bounce when words change.
 
-### 4. Create Highlights Introduction Video with Transitions & Hybrid Alignment
+### 5. Clean Empty Space Detection & Person Highlighting (Live Preview)
 
-Stitch the best soundbites into a teaser with transition effects (`fadewhite`, `fadeblack`) and dynamic captions. It uses a **Hybrid Alignment Engine**:
-- **Words Ground Truth**: Human-verified spelling from the YouTube API transcript.
-- **Timing Ground Truth**: Exact millisecond acoustic waveforms from audio clip analysis.
-- **Arabic Ligatures**: Native connected cursive text (`Segoe UI`, `Spacing=0`).
-- **No Overlaps & Zero Lag**: Word chunks appear synchronously with speech.
+Run live segment detection to find the cleanest unobstructed negative space in the background and highlight the speaker with neon contours:
 
-```powershell
-.venv\Scripts\python build_intro_video.py
+```bash
+# Basic run with video input (defaults to medium quality):
+python detect_empty_space.py "video.mp4"
+
+# Adjust output & processing quality (high | medium | low):
+python detect_empty_space.py "video.mp4" --quality high
+
+# Save a processed demo video:
+python detect_empty_space.py "video.mp4" --quality medium --save
+```
+
+#### Quality Presets:
+- `--quality high`: Full resolution (1080p), fine LER grid, visually lossless H.264 (CRF 18).
+- `--quality medium` (default): 720p scaling, balanced LER grid, crisp H.264 (CRF 22).
+- `--quality low`: 480p scaling, fast LER grid, high-speed H.264 (CRF 28).
+
+#### Interactive Keyboard Controls:
+- <kbd>P</kbd>: Toggle Person Highlight (neon outline + soft silhouette tint)
+- <kbd>E</kbd>: Toggle Empty Space Bounding Box
+- <kbd>C</kbd>: Toggle Visual Clutter / Canny edge density overlay
+- <kbd>B</kbd>: Toggle Raw Binary Mask overlay
+- <kbd>H</kbd>: Toggle Real-time Telemetry HUD
+- <kbd>Space</kbd>: Pause / Resume playback
+- <kbd>S</kbd>: Save snapshot image (PNG)
+- <kbd>Q</kbd>: Quit
+
+---
+
+### 4. Create Highlights Introduction Video with Dynamic Empty Space Typography
+
+Stitch selected soundbites into a teaser with transition effects (`fadewhite`, `fadeblack`), dynamic empty space placement, and modern typography styles. All clip timings and settings are stored in an external JSON configuration file (e.g. `clips.json` or `clips.example.json`):
+
+```bash
+# Run with default clips.json (Empty Space Detection + Floating Karaoke):
+python build_intro_video.py clips.json
+
+# Choose a typography style for all clips:
+python build_intro_video.py clips.json --style floating_karaoke
+python build_intro_video.py clips.json --style stacked_kinetic
+python build_intro_video.py clips.json --style glassmorphic
+python build_intro_video.py clips.json --style depth_layered
+
+# Modern Arabic Typography (Cairo, Readex Pro, IBM Plex Sans Arabic):
+python build_intro_video.py clips.json --font "Cairo" --style floating_karaoke
+
+# Configure Quality Preset (high | medium | low):
+python build_intro_video.py clips.json --quality high
+
+# Override source video or project ID on the fly:
+python build_intro_video.py clips.json --video input.mp4 --project-id my_custom_project
+```
+
+#### 🎨 4 Alternative Typography Styles for Empty Space:
+1. **Floating Karaoke Highlight** (`floating_karaoke`): Boxless floating bold white text with soft drop shadow; active word dynamically highlights in gold/red.
+2. **Stacked Kinetic Blocks** (`stacked_kinetic`): Stacks 2 to 3 words vertically, key word enlarged; fits tight lateral gaps beside a speaker's head.
+3. **Glassmorphic Pill** (`glassmorphic`): Rounded pill with 40% black opacity and subtle background blur / border highlight.
+4. **Depth-Layered Text** (`depth_layered`): Bold typography in the upper negative space with the speaker's head and shoulders masked *in front* of the text.
+
+#### Example `clips.json` Config:
+```json
+{
+  "project_id": "nasser_kandil",
+  "source_video": "/path/to/video.mp4",
+  "transcript_path": "projects/nasser_kandil/transcripts/DBMFJZDEhm4_transcript.json",
+  "settings": {
+    "theme_default": "floating_karaoke",
+    "font": "Cairo",
+    "quality": "high",
+    "placement": "auto",
+    "words_per_screen": 2,
+    "pop_animation": true,
+    "transition_duration": 0.6,
+    "transitions": ["fadewhite", "fadeblack"]
+  },
+  "clips": [
+    {
+      "id": "clip1",
+      "start": 354.7,
+      "end": 366.5,
+      "title": "📌 المحور الأول: اعتراف نتنياهو بالهزيمة",
+      "theme": "floating_karaoke"
+    },
+    {
+      "id": "clip2",
+      "start": 1275.3,
+      "end": 1290.5,
+      "title": "⚠️ المحور الثاني: سيناريو اقتحام واحتلال الكنيست",
+      "theme": "stacked_kinetic"
+    },
+    {
+      "id": "clip3",
+      "start": 1471.5,
+      "end": 1488.0,
+      "title": "💥 المحور الثالث: تفاصيل مخطط غزو صنعاء",
+      "theme": "glassmorphic"
+    }
+  ]
+}
+```
+
+---
+
+## 🗂️ Unique Project Directory Structure
+
+Every video or teaser project is isolated in its own unique directory under `projects/<project_id>/` to prevent file conflicts:
+
+```text
+projects/
+└── <project_id>/
+    ├── project_config.json        # Snapshot of settings used for the build
+    ├── transcripts/               # Transcripts (JSON, CSV, SRT, TXT)
+    │   ├── <name>_transcript.json
+    │   ├── <name>_words.csv
+    │   ├── <name>_words.srt
+    │   └── <name>_subtitles.srt
+    ├── clips/                     # Intermediate cut & styled segments
+    │   ├── clip1_raw.mp4
+    │   ├── clip1_dynamic.ass
+    │   ├── clip1_styled.mp4
+    │   └── ...
+    └── output/                    # Final rendered intro video
+        └── <project_id>_intro.mp4
 ```
 
 ### 2. Speed / Model Selection (CPU Guide)
@@ -114,7 +231,7 @@ For every video (e.g. `interview.mp4`), five output files are automatically gene
 
 ## 🎬 How to Use the Timestamps for Video Editing
 
-Use [video_tools.py](file:///C:/Users/AdMin/Documents/Video-Creation/video_tools.py) to edit videos using your transcript:
+Use [video_tools.py](video_tools.py) to edit videos using your transcript:
 
 ### Example 1: Cut a clip between two timestamps
 ```python

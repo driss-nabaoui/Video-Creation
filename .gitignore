@@ -1,4 +1,35 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environment
+.venv/
+env/
+venv/
+ENV/
+
+# Editor & IDE settings
+.vscode/
+.idea/
+
+# Subtitle and Media files
 *.ass
 *.mp4
-*.pyc
+*.mkv
+*.avi
+*.mov
+
+# Image snapshots / test artifacts
+*.png
+*.jpg
+*.jpeg
+
+# Project directories & generated outputs
+projects/
 transcripts/
+models/
+
+# Local configuration overrides (template provided in clips.example.json)
+clips.json

@@ -1,0 +1,38 @@
+{
+  "project_id": "intro_teaser_sample",
+  "source_video": "source_video.mp4",
+  "transcript_path": "projects/intro_teaser_sample/transcripts/transcript.json",
+  "settings": {
+    "theme_default": "floating_karaoke",
+    "font": "Cairo",
+    "quality": "high",
+    "placement": "auto",
+    "words_per_screen": 5,
+    "pop_animation": true,
+    "transition_duration": 0.6,
+    "transitions": ["fadewhite", "fadeblack"]
+  },
+  "clips": [
+    {
+      "id": "clip1",
+      "start": 354.7,
+      "end": 366.5,
+      "title": "📌 المحور الأول: اعتراف نتنياهو بالهزيمة",
+      "theme": "floating_karaoke"
+    },
+    {
+      "id": "clip2",
+      "start": 1275.3,
+      "end": 1290.5,
+      "title": "⚠️ المحور الثاني: سيناريو اقتحام واحتلال الكنيست",
+      "theme": "glassmorphic"
+    },
+    {
+      "id": "clip3",
+      "start": 1471.5,
+      "end": 1488.0,
+      "title": "💥 المحور الثالث: تفاصيل مخطط غزو صنعاء",
+      "theme": "stacked_kinetic"
+    }
+  ]
+}

@@ -26,7 +26,68 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+# Compatibility fix: PyAV 19 removed metadata_errors argument
+try:
+    import av
+    _orig_av_open = av.open
+    def _patched_av_open(*args, **kwargs):
+        kwargs.pop("metadata_errors", None)
+        return _orig_av_open(*args, **kwargs)
+    av.open = _patched_av_open
+except Exception:
+    pass
+
+import ctranslate2
 from faster_whisper import WhisperModel
+
+
+def load_whisper_model(
+    model_size: str,
+    device: str = "auto",
+    compute_type: Optional[str] = None,
+    threads: Optional[int] = None,
+) -> WhisperModel:
+    """
+    Initializes faster-whisper WhisperModel with automatic GPU (CUDA) detection
+    and seamless fallback to CPU if GPU is unavailable or initialization fails.
+    """
+    num_threads = threads or os.cpu_count() or 4
+    has_cuda = False
+    try:
+        has_cuda = ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        has_cuda = False
+
+    target_device = device.lower() if device else "auto"
+
+    if target_device in ("auto", "cuda") and has_cuda:
+        selected_compute = compute_type if compute_type and compute_type != "auto" else "float16"
+        try:
+            print(f"[*] Initializing faster-whisper '{model_size}' model on GPU (CUDA, {selected_compute})...", flush=True)
+            model = WhisperModel(
+                model_size_or_path=model_size,
+                device="cuda",
+                compute_type=selected_compute,
+                num_workers=1,
+            )
+            import numpy as np
+            model.model.encode(np.zeros((1, 80, 3000), dtype=np.float32))
+            return model
+        except Exception as e:
+            if target_device == "cuda":
+                raise RuntimeError(f"CUDA was explicitly requested but failed: {e}")
+            print(f"[!] GPU initialization failed: {e}. Falling back to CPU...", flush=True)
+
+    # CPU mode (explicit or fallback)
+    selected_compute = compute_type if compute_type and compute_type != "auto" else "int8"
+    print(f"[*] Initializing faster-whisper '{model_size}' model on CPU ({num_threads} threads, {selected_compute})...", flush=True)
+    return WhisperModel(
+        model_size_or_path=model_size,
+        device="cpu",
+        compute_type=selected_compute,
+        cpu_threads=num_threads,
+        num_workers=1,
+    )
 
 
 def format_timestamp(seconds: float, srt_format: bool = True) -> str:
@@ -94,15 +155,23 @@ def transcribe(
     threads: Optional[int] = None,
     start_time: Optional[str] = None,
     duration: Optional[str] = None,
+    device: str = "auto",
+    compute_type: Optional[str] = None,
+    project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Transcribes media file with real-time progressive disk streaming and word timestamps."""
     path = Path(media_path).resolve()
     if not path.is_file():
         raise FileNotFoundError(f"Media file not found: {path}")
 
-    target_dir = Path(output_dir).resolve() if output_dir else path.parent
-    target_dir.mkdir(parents=True, exist_ok=True)
     stem = path.stem
+    if output_dir:
+        target_dir = Path(output_dir).resolve()
+    else:
+        proj_name = project_id or re.sub(r'[\\/*?:"<>|]', "_", stem).strip()
+        target_dir = Path.cwd() / "projects" / proj_name / "transcripts"
+
+    target_dir.mkdir(parents=True, exist_ok=True)
 
     start_sec = parse_time_str(start_time)
     duration_sec = parse_time_str(duration)
@@ -117,14 +186,11 @@ def transcribe(
     # Pre-extract audio using FFmpeg for optimal speed
     temp_audio = extract_audio_fast(path, start_sec, duration_sec)
 
-    num_threads = threads or os.cpu_count() or 4
-    print(f"[*] Initializing faster-whisper '{model_size}' model on CPU ({num_threads} threads, int8)...", flush=True)
-    model = WhisperModel(
-        model_size_or_path=model_size,
-        device="cpu",
-        compute_type="int8",
-        cpu_threads=num_threads,
-        num_workers=1,
+    model = load_whisper_model(
+        model_size=model_size,
+        device=device,
+        compute_type=compute_type,
+        threads=threads,
     )
 
     print(f"[*] Starting transcription (progressive live saving enabled)...", flush=True)
@@ -299,7 +365,7 @@ def transcribe(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="CPU-Optimized Video Transcription with Real-time Progressive File Saving"
+        description="High-Speed Video Transcription with Real-time Progressive File Saving (Auto GPU/CPU)"
     )
     parser.add_argument("media", help="Path to video/audio file OR YouTube URL/ID")
     parser.add_argument(
@@ -308,6 +374,19 @@ def main():
         choices=["tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "large-v3"],
         help="Whisper model size (default: base). Use 'tiny' for maximum speed on long videos.",
     )
+    parser.add_argument(
+        "--device",
+        default="auto",
+        choices=["auto", "cuda", "cpu"],
+        help="Processing device: 'auto' (GPU with CPU fallback, default), 'cuda', or 'cpu'.",
+    )
+    parser.add_argument(
+        "--compute-type",
+        default=None,
+        choices=["auto", "float16", "int8_float16", "int8", "float32"],
+        help="Quantization / compute type (default: 'float16' on GPU, 'int8' on CPU).",
+    )
+    parser.add_argument("--project-id", default=None, help="Unique project identifier (saves in projects/<project_id>/transcripts/)")
     parser.add_argument("--language", default=None, help="Language code (e.g. 'ar', 'en')")
     parser.add_argument("-o", "--output-dir", default=None, help="Output directory")
     parser.add_argument("--threads", type=int, default=None, help="CPU threads to use")
@@ -328,6 +407,7 @@ def main():
                 get_transcript_from_url(
                     video_url_or_id=args.media,
                     output_dir=args.output_dir,
+                    project_id=args.project_id,
                     api_token=args.api_token,
                 )
                 return
@@ -344,6 +424,9 @@ def main():
             threads=args.threads,
             start_time=args.start,
             duration=args.duration,
+            device=args.device,
+            compute_type=args.compute_type,
+            project_id=args.project_id,
         )
     except KeyboardInterrupt:
         print("\nExited by user.", file=sys.stderr)

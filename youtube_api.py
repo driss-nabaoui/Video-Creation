@@ -14,6 +14,7 @@ import csv
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -118,16 +119,22 @@ def process_and_save_transcript(
     api_item: Dict[str, Any],
     output_dir: Optional[str] = None,
     custom_stem: Optional[str] = None,
+    project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Parses transcript segments, calculates word-level timestamps in seconds,
-    and writes JSON, CSV, SRT, words SRT, and TXT files.
+    and writes JSON, CSV, SRT, words SRT, and TXT files inside the project directory.
     """
     video_id = api_item.get("id", "unknown_video")
     title = api_item.get("title", f"youtube_{video_id}")
     stem = custom_stem or sanitize_filename(f"{title}_{video_id}")
 
-    target_dir = Path(output_dir).resolve() if output_dir else Path.cwd() / "transcripts"
+    if output_dir:
+        target_dir = Path(output_dir).resolve()
+    else:
+        proj_name = project_id or sanitize_filename(f"{title}_{video_id}"[:60]).strip("_") or video_id
+        target_dir = Path.cwd() / "projects" / proj_name / "transcripts"
+
     target_dir.mkdir(parents=True, exist_ok=True)
 
     tracks = api_item.get("tracks", [])
@@ -264,18 +271,174 @@ def process_and_save_transcript(
     return result_data
 
 
+def parse_vtt_to_words(vtt_path: Path) -> List[Dict[str, Any]]:
+    """Parse WebVTT with inline word timestamps (<HH:MM:SS.mmm>) into word objects."""
+    text = vtt_path.read_text(encoding="utf-8")
+    cue_pattern = re.compile(
+        r'(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3}).*?\n(.*?)(?=\n\d{2}:\d{2}:\d{2}\.\d{3}|\Z)',
+        re.DOTALL
+    )
+
+    def to_seconds(t_str: str) -> float:
+        parts = [float(p) for p in t_str.split(":")]
+        if len(parts) == 3:
+            return round(parts[0] * 3600 + parts[1] * 60 + parts[2], 3)
+        return 0.0
+
+    words = []
+    seen = set()
+
+    for match in cue_pattern.finditer(text):
+        cue_start = to_seconds(match.group(1))
+        cue_body = match.group(3).strip()
+        lines = [l.strip() for l in cue_body.splitlines() if "<" in l and ">" in l]
+
+        for line in lines:
+            tokens = re.split(r'(<\d{2}:\d{2}:\d{2}\.\d{3}>)', line)
+            cur_time = cue_start
+            for t in tokens:
+                t = t.strip()
+                if not t:
+                    continue
+                m_time = re.match(r'<(\d{2}:\d{2}:\d{2}\.\d{3})>', t)
+                if m_time:
+                    cur_time = to_seconds(m_time.group(1))
+                else:
+                    clean_w = re.sub(r'</?c>', '', t).replace('&gt;', '').replace('&amp;', '&').strip()
+                    if clean_w:
+                        w_key = (clean_w, cur_time)
+                        if w_key not in seen:
+                            seen.add(w_key)
+                            words.append({
+                                "word": clean_w,
+                                "start": cur_time,
+                                "end": round(cur_time + 0.35, 3),
+                                "probability": 1.0,
+                            })
+
+    for i in range(len(words) - 1):
+        next_s = words[i + 1]["start"]
+        if next_s > words[i]["start"] and next_s - words[i]["start"] <= 2.0:
+            words[i]["end"] = next_s
+        words[i]["duration"] = round(words[i]["end"] - words[i]["start"], 3)
+        words[i]["index"] = i
+
+    if words:
+        words[-1]["index"] = len(words) - 1
+        words[-1]["duration"] = round(words[-1]["end"] - words[-1]["start"], 3)
+
+    return words
+
+
+def fetch_and_process_ytdlp_captions(
+    video_id: str,
+    output_dir: Optional[str] = None,
+    project_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Download YouTube's native auto-captions via yt-dlp and generate transcript files."""
+    if output_dir:
+        target_dir = Path(output_dir).resolve()
+    else:
+        proj_name = project_id or video_id
+        target_dir = Path.cwd() / "projects" / proj_name / "transcripts"
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[*] Downloading native YouTube captions via yt-dlp for ID: {video_id}...", flush=True)
+
+    ytdlp_cmd = [
+        sys.executable, "-m", "yt_dlp",
+        "--write-auto-sub",
+        "--sub-lang", "ar-orig,ar",
+        "--skip-download",
+        "--ignore-errors",
+        "-P", str(target_dir),
+        "-o", f"{video_id}.%(ext)s",
+        f"https://www.youtube.com/watch?v={video_id}",
+    ]
+    subprocess.run(ytdlp_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    vtt_candidates = (
+        list(target_dir.glob(f"{video_id}.*.vtt"))
+        + list(target_dir.glob("*.vtt"))
+    )
+    if not vtt_candidates:
+        raise RuntimeError(f"yt-dlp could not find auto-captions for video {video_id}")
+
+    vtt_file = vtt_candidates[0]
+    words = parse_vtt_to_words(vtt_file)
+    if not words:
+        raise RuntimeError(f"Could not parse word timestamps from {vtt_file}")
+
+    total_duration = words[-1]["end"] if words else 0.0
+    stem = f"{video_id}"
+
+    result_data = {
+        "source": "youtube_captions_ytdlp",
+        "video_id": video_id,
+        "title": f"youtube_{video_id}",
+        "duration_seconds": round(total_duration, 3),
+        "language": "ar",
+        "total_words": len(words),
+        "total_segments": 0,
+        "text": " ".join(w["word"] for w in words),
+        "words": words,
+        "segments": [],
+    }
+
+    # Save outputs
+    json_path = target_dir / f"{stem}_transcript.json"
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(result_data, f, indent=2, ensure_ascii=False)
+
+    txt_path = target_dir / f"{stem}_transcript.txt"
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write(result_data["text"] + "\n")
+
+    csv_path = target_dir / f"{stem}_words.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["index", "word", "start_seconds", "end_seconds", "duration_seconds", "probability"])
+        for w in words:
+            writer.writerow([w["index"], w["word"], w["start"], w["end"], w["duration"], w["probability"]])
+
+    words_srt_path = target_dir / f"{stem}_words.srt"
+    with open(words_srt_path, "w", encoding="utf-8") as f:
+        for w in words:
+            f.write(f"{w['index'] + 1}\n")
+            f.write(f"{format_timestamp(w['start'])} --> {format_timestamp(w['end'])}\n")
+            f.write(f"{w['word']}\n\n")
+
+    print("\n" + "=" * 60, flush=True)
+    print(f"[✓] TRANSCRIPT EXTRACTED VIA YT-DLP!", flush=True)
+    print(f"[✓] Video ID:         {video_id}", flush=True)
+    print(f"[✓] Video Duration:   {total_duration:.1f}s ({total_duration / 60:.1f} mins)", flush=True)
+    print(f"[✓] Total Words:      {len(words)}", flush=True)
+    print(f"[+] Output JSON:      {json_path}", flush=True)
+    print(f"[+] Output CSV:       {csv_path}", flush=True)
+    print(f"[+] Output Words SRT: {words_srt_path}", flush=True)
+    print(f"[+] Output Text:      {txt_path}", flush=True)
+    print("=" * 60, flush=True)
+
+    return result_data
+
+
 def get_transcript_from_url(
     video_url_or_id: str,
     output_dir: Optional[str] = None,
     api_token: Optional[str] = None,
+    project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """End-to-end helper: takes any YouTube URL or ID and generates all transcript files."""
     video_id = extract_video_id(video_url_or_id)
     if not video_id:
         raise ValueError(f"Could not extract a valid 11-character YouTube video ID from: {video_url_or_id}")
 
-    api_item = fetch_transcript_from_api(video_id, api_token=api_token)
-    return process_and_save_transcript(api_item, output_dir=output_dir)
+    try:
+        api_item = fetch_transcript_from_api(video_id, api_token=api_token)
+        return process_and_save_transcript(api_item, output_dir=output_dir, project_id=project_id)
+    except Exception as e:
+        print(f"[!] API fetch failed: {e}. Falling back to yt-dlp native captions...", flush=True)
+        return fetch_and_process_ytdlp_captions(video_id, output_dir=output_dir, project_id=project_id)
 
 
 def main():
@@ -283,7 +446,8 @@ def main():
         description="Instant YouTube Transcript Fetcher with Word-Level Timestamps"
     )
     parser.add_argument("url", help="YouTube video URL or Video ID (e.g. https://www.youtube.com/watch?v=DBMFJZDEhm4)")
-    parser.add_argument("-o", "--output-dir", default=None, help="Directory to save transcript files")
+    parser.add_argument("--project-id", default=None, help="Unique project identifier (saves in projects/<project_id>/transcripts/)")
+    parser.add_argument("-o", "--output-dir", default=None, help="Explicit directory to save transcript files")
     parser.add_argument("--token", default=None, help="Custom Bearer token for youtube-transcript.io API")
 
     args = parser.parse_args()
@@ -293,6 +457,7 @@ def main():
             video_url_or_id=args.url,
             output_dir=args.output_dir,
             api_token=args.token,
+            project_id=args.project_id,
         )
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
