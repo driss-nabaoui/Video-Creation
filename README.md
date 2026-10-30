@@ -52,9 +52,13 @@ Options:
 - `--position`: `bottom` (lower-third), `center` (middle screen), `dynamic` (subtle alternating vertical bounce).
 - `--no-pop`: Disable the 15% spring pop bounce when words change.
 
-### 4. Create Highlights Introduction Video with Transitions
+### 4. Create Highlights Introduction Video with Transitions & Hybrid Alignment
 
-Stitch the best soundbites into a teaser with transition effects (`fadewhite`, `fadeblack`) and dynamic captions:
+Stitch the best soundbites into a teaser with transition effects (`fadewhite`, `fadeblack`) and dynamic captions. It uses a **Hybrid Alignment Engine**:
+- **Words Ground Truth**: Human-verified spelling from the YouTube API transcript.
+- **Timing Ground Truth**: Exact millisecond acoustic waveforms from audio clip analysis.
+- **Arabic Ligatures**: Native connected cursive text (`Segoe UI`, `Spacing=0`).
+- **No Overlaps & Zero Lag**: Word chunks appear synchronously with speech.
 
 ```powershell
 .venv\Scripts\python build_intro_video.py

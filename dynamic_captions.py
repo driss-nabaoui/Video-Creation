@@ -150,9 +150,16 @@ def build_dynamic_ass(
         c_start = chunk[0]["start"]
         c_end = chunk[-1]["end"]
 
-        # Ensure minimal visible window of at least 0.35s
-        if c_end - c_start < 0.35:
-            c_end = c_start + 0.35
+        # Prevent overlapping captions across adjacent chunks
+        if chunk_idx + 1 < len(chunks):
+            next_start = chunks[chunk_idx + 1][0]["start"]
+            if c_end > next_start:
+                c_end = next_start
+            elif c_end - c_start < 0.25 and next_start > c_end:
+                c_end = min(c_start + 0.30, next_start)
+        else:
+            if c_end - c_start < 0.30:
+                c_end = c_start + 0.30
 
         if max_duration and c_end > max_duration:
             c_end = max_duration
