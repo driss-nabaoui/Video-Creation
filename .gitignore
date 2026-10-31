@@ -14,6 +14,9 @@ ENV/
 .vscode/
 .idea/
 
+# Python Wheels and Installers
+*.whl
+
 # Subtitle and Media files
 *.ass
 *.mp4
@@ -33,3 +36,4 @@ models/
 
 # Local configuration overrides (template provided in clips.example.json)
 clips.json
+whl_download_links.txt

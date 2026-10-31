@@ -60,6 +60,13 @@ QUALITY_PRESETS = {
         "preset": "fast",
         "desc": "Full 1080p • Fine LER • Visually Lossless",
     },
+    "1080p": {
+        "max_dim": 1920,
+        "ler_scale": 6,
+        "crf": "18",
+        "preset": "fast",
+        "desc": "Full 1080p • Fine LER • Visually Lossless",
+    },
     "medium": {
         "max_dim": 1280,
         "ler_scale": 8,
@@ -67,7 +74,21 @@ QUALITY_PRESETS = {
         "preset": "fast",
         "desc": "720p Scaled • Balanced LER • High Performance",
     },
+    "720p": {
+        "max_dim": 1280,
+        "ler_scale": 8,
+        "crf": "22",
+        "preset": "fast",
+        "desc": "720p Scaled • Balanced LER • High Performance",
+    },
     "low": {
+        "max_dim": 854,
+        "ler_scale": 12,
+        "crf": "28",
+        "preset": "veryfast",
+        "desc": "480p Scaled • Fast LER • Maximum Speed",
+    },
+    "480p": {
         "max_dim": 854,
         "ler_scale": 12,
         "crf": "28",

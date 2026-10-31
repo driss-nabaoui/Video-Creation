@@ -101,6 +101,71 @@ THEMES = {
         "karaoke": False,
         "stacked": False,
     },
+    # 7. Broadcast Investigative Dark (Default documentary / broadcast editorial)
+    "broadcast_investigative_dark": {
+        "font": "Cairo",
+        "text_color": "&H00FFFFFF&",       # Crisp White
+        "box_color": "&H00000000&",
+        "highlight_color": "&H0000D7FF&",  # Warm Gold
+        "fontsize": 52,
+        "outline": 3,
+        "shadow": 3,
+        "border_style": 1,
+        "karaoke": True,
+        "stacked": False,
+    },
+    # 8. Urgent Red (Breaking news, existential stakes, civil clash)
+    "urgent_red": {
+        "font": "Cairo",
+        "text_color": "&H00FFFFFF&",       # White
+        "box_color": "&H00000000&",
+        "highlight_color": "&H002020FF&",  # Vivid Signal Red / Crimson
+        "fontsize": 52,
+        "outline": 3,
+        "shadow": 3,
+        "border_style": 1,
+        "karaoke": True,
+        "stacked": False,
+    },
+    # 9. Suspense Amber (Dramatic questions, rising tension, ultimatum)
+    "suspense_amber": {
+        "font": "Cairo",
+        "text_color": "&H00FFFFFF&",       # White
+        "box_color": "&H00000000&",
+        "highlight_color": "&H000099FF&",  # Electric Amber / Vibrant Orange
+        "fontsize": 52,
+        "outline": 3,
+        "shadow": 3,
+        "border_style": 1,
+        "karaoke": True,
+        "stacked": False,
+    },
+    # 10. Investigative Blue (Diplomatic leaks, intelligence, Foreign Affairs)
+    "investigative_blue": {
+        "font": "Cairo",
+        "text_color": "&H00FFFFFF&",       # White
+        "box_color": "&H00000000&",
+        "highlight_color": "&H00FFD000&",  # Electric Cyan / Vivid Sky Blue
+        "fontsize": 52,
+        "outline": 3,
+        "shadow": 3,
+        "border_style": 1,
+        "karaoke": True,
+        "stacked": False,
+    },
+    # 11. Highlight Gold (Decisive revelations, counter-intuitive facts)
+    "highlight_gold": {
+        "font": "Cairo",
+        "text_color": "&H00FFFFFF&",       # White
+        "box_color": "&H00000000&",
+        "highlight_color": "&H0000D7FF&",  # Luminous Champagne Gold
+        "fontsize": 52,
+        "outline": 3,
+        "shadow": 3,
+        "border_style": 1,
+        "karaoke": True,
+        "stacked": False,
+    },
 }
 
 
@@ -254,11 +319,18 @@ def build_dynamic_ass(
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
         f"Style: DynamicWord,{font_name},{style_cfg['fontsize']},{primary_color},&H000000FF,{style_cfg['box_color']},{style_cfg['box_color']},-1,0,0,0,100,100,0,0,{style_cfg['border_style']},{style_cfg['outline']},{shadow_val},{alignment},30,30,{margin_v},1",
-        f"Style: HeaderBadge,{font_name},28,&H0000D7FF,&H000000FF,&HA0101010,&HA0101010,-1,0,0,0,100,100,0,0,3,10,0,8,40,40,25,1",
+    ]
+
+    if header_badge:
+        ass_lines.append(
+            f"Style: HeaderBadge,{font_name},28,&H0000D7FF,&H000000FF,&HA0101010,&HA0101010,-1,0,0,0,100,100,0,0,3,10,0,8,40,40,25,1"
+        )
+
+    ass_lines.extend([
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    ]
+    ])
 
     # Optional top header badge
     if header_badge and max_duration:

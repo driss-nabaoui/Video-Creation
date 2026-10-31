@@ -45,6 +45,28 @@ from detect_empty_space import EmptySpaceDetector, QUALITY_PRESETS
 from depth_compositor import DepthVideoCompositor
 
 
+_HAS_NVENC = None
+
+
+def has_nvenc() -> bool:
+    """Check if FFmpeg supports NVIDIA NVENC hardware encoder."""
+    global _HAS_NVENC
+    if _HAS_NVENC is not None:
+        return _HAS_NVENC
+    try:
+        res = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=3,
+        )
+        _HAS_NVENC = "h264_nvenc" in (res.stdout or "")
+    except Exception:
+        _HAS_NVENC = False
+    return _HAS_NVENC
+
+
 def load_alignment_model(model_name: str = "tiny", device: str = "auto") -> WhisperModel:
     """Load Whisper model with automatic GPU (CUDA) acceleration and CPU fallback."""
     has_cuda = False
@@ -58,10 +80,7 @@ def load_alignment_model(model_name: str = "tiny", device: str = "auto") -> Whis
     if target_device in ("auto", "cuda") and has_cuda:
         try:
             print(f"[*] Initializing audio alignment engine on GPU (CUDA, float16)...", flush=True)
-            model = WhisperModel(model_name, device="cuda", compute_type="float16")
-            import numpy as np
-            model.model.encode(np.zeros((1, 80, 3000), dtype=np.float32))
-            return model
+            return WhisperModel(model_name, device="cuda", compute_type="float16")
         except Exception as e:
             if target_device == "cuda":
                 raise RuntimeError(f"CUDA was explicitly requested but failed: {e}")
@@ -182,7 +201,24 @@ def get_clip_words_with_timing(
 
 
 def cut_raw_clip(src_video: str, start: float, duration: float, out_path: Path):
-    """Cut clean raw video clip from source file."""
+    """Cut clean raw video clip from source file, using GPU (NVENC/CUDA) when available."""
+    if has_nvenc():
+        try:
+            cmd = [
+                "ffmpeg", "-y",
+                "-hwaccel", "cuda",
+                "-ss", str(start),
+                "-i", str(src_video),
+                "-t", str(duration),
+                "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
+                "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+                str(out_path),
+            ]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            return
+        except subprocess.CalledProcessError:
+            pass
+
     cmd = [
         "ffmpeg", "-y",
         "-ss", str(start),
@@ -345,17 +381,75 @@ def style_clip_with_ass(
     crf: str = "19",
     preset: str = "fast",
 ):
-    """Burn dynamic ASS subtitles onto the cut clip with universal 4:2:0 format."""
+    """Burn dynamic ASS subtitles onto the cut clip with universal 4:2:0 format, using GPU (NVENC) when available."""
     escaped_ass = str(ass_path.resolve()).replace("\\", "/").replace(":", "\\:")
+    if has_nvenc():
+        try:
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(raw_clip),
+                "-vf", f"subtitles='{escaped_ass}',scale=1280:720,setsar=1,fps=25,format=yuv420p",
+                "-c:v", "h264_nvenc", "-preset", "p4", "-cq", str(crf),
+                "-c:a", "copy",
+                str(out_styled),
+            ]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            return
+        except subprocess.CalledProcessError:
+            pass
+
     cmd = [
         "ffmpeg", "-y",
         "-i", str(raw_clip),
         "-vf", f"subtitles='{escaped_ass}',scale=1280:720,setsar=1,fps=25,format=yuv420p",
-        "-c:v", "libx264", "-preset", preset, "-crf", crf,
+        "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
         "-c:a", "copy",
         str(out_styled),
     ]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+
+VALID_XFADE_TRANSITIONS = {
+    "fade", "wipeleft", "wiperight", "wipeup", "wipedown",
+    "slideleft", "slideright", "slideup", "slidedown",
+    "circlecrop", "rectcrop", "distance", "fadeblack", "fadewhite",
+    "radial", "smoothleft", "smoothright", "smoothup", "smoothdown",
+    "circleopen", "circleclose", "vertopen", "vertclose",
+    "horzopen", "horzclose", "dissolve", "pixelize",
+    "diagtl", "diagtr", "diagbl", "diagbr",
+    "hlslice", "hrslice", "vuslice", "vdslice",
+    "hblur", "fadegrays", "wipetl", "wipetr", "wipebl", "wipebr",
+    "squeezeh", "squeezev", "zoomin", "fadefast", "fadeslow",
+    "hlwind", "hrwind", "vuwind", "vdwind",
+    "coverleft", "coverright", "coverup", "coverdown",
+    "revealleft", "revealright", "revealup", "revealdown",
+}
+
+TRANSITION_ALIASES = {
+    "flash_cut": "fadewhite",
+    "dip_to_black": "fadeblack",
+    "cross_dissolve": "dissolve",
+    "glitch_cut": "pixelize",
+    "audio_j_cut": "fadefast",
+    "j_cut": "fadefast",
+    "l_cut": "fadefast",
+    "cut": "fadefast",
+    "white_flash": "fadewhite",
+    "black_dip": "fadeblack",
+    "blur": "hblur",
+    "zoom": "zoomin",
+}
+
+
+def resolve_xfade_transition(name: str) -> str:
+    """Normalize and resolve user transition name to valid FFmpeg xfade transition."""
+    clean = str(name).strip().lower().replace("-", "_").replace(" ", "_")
+    if clean in VALID_XFADE_TRANSITIONS:
+        return clean
+    if clean in TRANSITION_ALIASES:
+        return TRANSITION_ALIASES[clean]
+    print(f"[!] Warning: Unknown xfade transition '{name}', falling back to 'fadeblack'", flush=True)
+    return "fadeblack"
 
 
 def merge_clips_with_transitions(
@@ -365,10 +459,12 @@ def merge_clips_with_transitions(
     trans_dur: float = 0.6,
     transitions: Optional[List[str]] = None,
 ) -> None:
-    """Dynamically merges N clips using xfade and acrossfade transitions."""
+    """Dynamically merges N clips using xfade and acrossfade transitions, with GPU (NVENC) acceleration."""
     n = len(clip_paths)
     if n == 0:
         raise ValueError("No clips to merge.")
+
+    v_enc = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "19"] if has_nvenc() else ["-c:v", "libx264", "-preset", "fast", "-crf", "19"]
 
     if n == 1:
         # Single clip: simply apply subtle in/out fade
@@ -383,7 +479,7 @@ def merge_clips_with_transitions(
             "-i", str(clip_paths[0]),
             "-filter_complex", filter_complex,
             "-map", "[vout]", "-map", "[aout]",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+            *v_enc,
             "-pix_fmt", "yuv420p",
             "-profile:v", "high", "-level", "4.0",
             "-movflags", "+faststart",
@@ -391,7 +487,12 @@ def merge_clips_with_transitions(
             str(output_video_path),
         ]
         print(f"[*] Exporting single styled clip...", flush=True)
-        subprocess.run(cmd, check=True)
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            if has_nvenc():
+                cmd[cmd.index("h264_nvenc")] = "libx264"
+                subprocess.run(cmd, check=True)
         return
 
     if not transitions:
@@ -406,8 +507,11 @@ def merge_clips_with_transitions(
     last_v = "[0:v]"
     last_a = "[0:a]"
 
+    resolved_trans_names = []
     for i in range(1, n):
-        trans = transitions[(i - 1) % len(transitions)]
+        raw_trans = transitions[(i - 1) % len(transitions)]
+        trans = resolve_xfade_transition(raw_trans)
+        resolved_trans_names.append(trans)
         next_v = f"[{i}:v]"
         next_a = f"[{i}:a]"
         out_v = f"[v{i}]" if i < n - 1 else "[v_pre]"
@@ -435,7 +539,7 @@ def merge_clips_with_transitions(
     cmd.extend([
         "-filter_complex", filter_complex,
         "-map", "[vout]", "-map", "[aout]",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+        *v_enc,
         "-pix_fmt", "yuv420p",
         "-profile:v", "high", "-level", "4.0",
         "-movflags", "+faststart",
@@ -443,8 +547,26 @@ def merge_clips_with_transitions(
         str(output_video_path),
     ])
 
-    print(f"\n[*] Merging {n} clips with transitions ({', '.join(transitions)})...", flush=True)
-    subprocess.run(cmd, check=True)
+    print(f"\n[*] Merging {n} clips with transitions ({', '.join(resolved_trans_names)})...", flush=True)
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError:
+        if has_nvenc():
+            print("[!] NVENC merge failed, retrying with CPU libx264...", flush=True)
+            cmd = ["ffmpeg", "-y"]
+            for c in clip_paths:
+                cmd.extend(["-i", str(c)])
+            cmd.extend([
+                "-filter_complex", filter_complex,
+                "-map", "[vout]", "-map", "[aout]",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+                "-pix_fmt", "yuv420p",
+                "-profile:v", "high", "-level", "4.0",
+                "-movflags", "+faststart",
+                "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+                str(output_video_path),
+            ])
+            subprocess.run(cmd, check=True)
 
 
 def build_intro_video(
@@ -458,6 +580,7 @@ def build_intro_video(
     quality_override: Optional[str] = None,
     placement_override: Optional[str] = None,
     device: str = "auto",
+    show_title: bool = False,
 ):
     """Main workflow to execute intro build from a JSON project configuration."""
     cfg_file = Path(config_path)
@@ -509,6 +632,8 @@ def build_intro_video(
     print(f"  Quality Preset:         {quality} ({quality_cfg['desc']})", flush=True)
     print(f"  Placement Mode:         {placement}", flush=True)
     print(f"  Typography Style:       {theme_default} (Font: {font_name})", flush=True)
+    print(f"  GPU Acceleration:       {'Enabled (h264_nvenc)' if has_nvenc() else 'Disabled (libx264 CPU)'}", flush=True)
+    print(f"  Show Title in Frame:    {show_title}", flush=True)
     print("=" * 60, flush=True)
 
     # Initialize empty space detector
@@ -516,7 +641,7 @@ def build_intro_video(
 
     # Load words
     api_words_all = find_transcript_words(transcript_path=transcript_path, project_id=project_id)
-    whisper_model = load_alignment_model("tiny", device=device)
+    whisper_model = None  # Lazy-load only if transcript timestamps are missing
 
     clip_paths = []
     durations = []
@@ -533,7 +658,7 @@ def build_intro_video(
         styled_clip = clips_dir / f"{clip_id}_styled.mp4"
         ass_file = clips_dir / f"{clip_id}_dynamic.ass"
 
-        print(f"\n[*] Processing [{clip_id}]: {start}s -> {end}s ({duration}s) | '{title}'", flush=True)
+        print(f"\n[*] Processing [{clip_id}]: {start}s -> {end}s ({duration}s)" + (f" | '{title}'" if title else ""), flush=True)
 
         # 1. Cut clean raw clip
         cut_raw_clip(source_video, start, duration, raw_clip)
@@ -547,6 +672,15 @@ def build_intro_video(
             print(f"[+] Detected clean empty space: {quad} [{ex}, {ey}, {ew}x{eh}] | Lum: {lum:.1f}", flush=True)
 
         # 3. Get words with exact acoustic timestamps
+        has_timestamps = (
+            api_words_all
+            and isinstance(api_words_all[0], dict)
+            and "start" in api_words_all[0]
+            and "end" in api_words_all[0]
+        )
+        if not has_timestamps and whisper_model is None:
+            whisper_model = load_alignment_model("tiny", device=device)
+
         aligned_words = get_clip_words_with_timing(
             all_words=api_words_all,
             start_t=start,
@@ -556,6 +690,8 @@ def build_intro_video(
         )
         print(f"[+] Loaded {len(aligned_words)} words with acoustic timestamps: {' '.join(w['word'] for w in aligned_words[:6])}...", flush=True)
 
+        badge_to_draw = title if (show_title and title) else None
+
         # 6. Apply transcription typography style
         if clip_theme == "depth_layered":
             print(f"[*] Rendering depth-layered text (speaker masked in front)...", flush=True)
@@ -564,7 +700,7 @@ def build_intro_video(
                 input_video_path=str(raw_clip),
                 words=aligned_words,
                 output_video_path=str(styled_clip),
-                header_badge=title if title else None,
+                header_badge=badge_to_draw,
                 max_duration=duration,
             )
         else:
@@ -578,7 +714,7 @@ def build_intro_video(
                 target_box=ass_box,
                 max_duration=duration,
                 pop_animation=pop_animation,
-                header_badge=title if title else None,
+                header_badge=badge_to_draw,
                 font=font_name,
             )
             print(f"[*] Burning styled subtitles into {clip_id} ({clip_theme})...", flush=True)
@@ -632,26 +768,36 @@ def main():
         "--style", "--theme",
         dest="style",
         default=None,
-        choices=["floating_karaoke", "stacked_kinetic", "glassmorphic", "depth_layered", "dark_pill", "yellow_pop", "red_alert"],
+        choices=[
+            "floating_karaoke", "stacked_kinetic", "glassmorphic", "depth_layered",
+            "dark_pill", "yellow_pop", "red_alert", "broadcast_investigative_dark",
+            "urgent_red", "suspense_amber", "investigative_blue", "highlight_gold",
+        ],
         help="Subtitle typography theme/style (default: from config or floating_karaoke)",
     )
     parser.add_argument(
         "--quality",
         default=None,
-        choices=["high", "medium", "low"],
-        help="Output quality preset: high (1080p CRF 18), medium (720p CRF 22), low (480p CRF 28)",
+        choices=["high", "medium", "low", "1080p", "720p", "480p"],
+        help="Output quality preset: high/1080p (CRF 18), medium/720p (CRF 22), low/480p (CRF 28)",
     )
     parser.add_argument(
         "--placement",
         default=None,
-        choices=["auto", "empty_space", "bottom", "center"],
-        help="Subtitle placement mode: auto (dynamic empty space) or fixed position",
+        choices=["auto", "empty_space", "bottom", "center", "bottom_center"],
+        help="Subtitle placement mode: auto (dynamic empty space) or fixed position (bottom, center, bottom_center)",
     )
     parser.add_argument(
         "--device",
         default="auto",
         choices=["auto", "cuda", "cpu"],
         help="Whisper alignment device: auto (default), cuda, or cpu",
+    )
+    parser.add_argument(
+        "--show-title",
+        action="store_true",
+        default=False,
+        help="Burn the clip title as a top badge into the frame (default: False/disabled)",
     )
 
     args = parser.parse_args()
@@ -679,6 +825,7 @@ def main():
             quality_override=args.quality,
             placement_override=args.placement,
             device=args.device,
+            show_title=args.show_title,
         )
     except KeyboardInterrupt:
         print("\nExited by user.", file=sys.stderr)
