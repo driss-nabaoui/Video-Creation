@@ -24,6 +24,9 @@ An end-to-end toolkit to transcribe long-form videos, detect clean background ne
 # Analyze full parliamentary video and export ranked tension clips + timestamps.json
 python find_tension.py --input debate_video.mp4 --threshold 60.0
 
+# Use pre-existing transcript (bypasses Whisper GPU/CPU inference completely):
+python find_tension.py --input debate_video.mp4 --transcript projects/teaser/transcripts/video_transcript.json
+
 # Optional flags (lossless cutting, custom padding, HuggingFace Pyannote token):
 python find_tension.py --input debate_video.mp4 --threshold 55.0 --padding-before 4.0 --padding-after 3.0 --merge-gap 8.0 --lossless
 ```
