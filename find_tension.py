@@ -86,6 +86,12 @@ def parse_args():
         help="Hardware accelerator to use for neural models",
     )
     parser.add_argument(
+        "--transcript",
+        type=str,
+        default=None,
+        help="Path to pre-computed transcript JSON file (bypasses Whisper model execution entirely)",
+    )
+    parser.add_argument(
         "--whisper-model",
         type=str,
         default="base",
@@ -191,13 +197,46 @@ def main():
 
     # Step 4: Signal 3 - Transcript Sentiment, Speech Rate & Hostility (25%)
     print("\n" + "=" * 60)
-    print("STEP 4: Transcribing & Evaluating Lexical Hostility (25% weight)")
+    print("STEP 4: Evaluating Lexical Hostility & Speech Rate (25% weight)")
     print("=" * 60)
+    transcript_file = None
+    if args.transcript:
+        candidate = Path(args.transcript).resolve()
+        if candidate.is_file():
+            transcript_file = candidate
+            print(f"[+] Using specified transcript: {transcript_file}")
+        else:
+            print(f"[!] Warning: Specified transcript '{args.transcript}' not found. Falling back to Whisper.")
+
+    # Auto-detection if not explicitly passed
+    if not transcript_file:
+        import re
+        vid_id_match = re.search(r"\[([a-zA-Z0-9_-]{11})\]", input_path.stem)
+        check_paths = []
+        if vid_id_match:
+            vid_id = vid_id_match.group(1)
+            check_paths.append(ROOT_DIR / f"projects/{vid_id}/transcripts/{vid_id}_transcript.json")
+            check_paths.append(ROOT_DIR / f"transcripts/{vid_id}_transcript.json")
+        check_paths.append(input_path.with_suffix(".json"))
+        check_paths.append(input_path.parent / f"{input_path.stem}_transcript.json")
+        check_paths.append(ROOT_DIR / f"transcripts/{input_path.stem}_transcript.json")
+
+        for cp in check_paths:
+            if cp.is_file():
+                transcript_file = cp
+                print(f"[+] Auto-detected pre-existing transcript: {transcript_file}")
+                print("[*] Skipping Whisper GPU/CPU inference — using ready transcript!")
+                break
+
     transcript_analyzer = TranscriptAnalyzer(model_size=args.whisper_model, device=args.device)
-    transcript_res = transcript_analyzer.analyze(temp_audio_path, total_duration=total_duration)
+    transcript_res = transcript_analyzer.analyze(
+        audio_path=temp_audio_path if not transcript_file else None,
+        total_duration=total_duration,
+        precomputed_transcript_path=transcript_file,
+    )
     transcript_scores = transcript_res["scores"]
     whisper_segments = transcript_res.get("segments", [])
-    print(f"[+] Transcript analysis complete: Language detected='{transcript_res.get('language')}', {len(whisper_segments)} segments transcribed.")
+    print(f"[+] Transcript analysis complete: Language detected='{transcript_res.get('language')}', {len(whisper_segments)} segments evaluated.")
 
     # Step 5: Multi-Signal Fusion, Smoothing, Merging & Scene Ranking
     print("\n" + "=" * 60)

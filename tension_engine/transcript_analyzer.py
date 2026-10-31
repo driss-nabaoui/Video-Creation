@@ -138,14 +138,96 @@ class TranscriptAnalyzer:
         print(f"[+] Transcription complete: {len(segments)} segments, {len(words)} words (Language: {info.language}).", flush=True)
         return segments, words, info.language
 
+    @staticmethod
+    def load_transcript_file(transcript_path: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str]:
+        """
+        Loads pre-computed transcript from JSON file (supports Whisper output, YouTube API, etc.).
+        Returns: (segments, words, language)
+        """
+        import json
+        transcript_path = Path(transcript_path).resolve()
+        if not transcript_path.is_file():
+            raise FileNotFoundError(f"Transcript file not found: {transcript_path}")
+
+        print(f"[*] Ingesting pre-existing transcript from: {transcript_path.name}...", flush=True)
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        language = "ar"
+        segments = []
+        words = []
+
+        if isinstance(data, dict):
+            language = data.get("language", "ar")
+            if "words" in data and isinstance(data["words"], list) and len(data["words"]) > 0:
+                words = data["words"]
+            if "segments" in data and isinstance(data["segments"], list) and len(data["segments"]) > 0:
+                segments = data["segments"]
+        elif isinstance(data, list):
+            segments = data
+
+        # If we have segments but no standalone words list, extract words from segments
+        if not words and segments:
+            for seg in segments:
+                if "words" in seg and isinstance(seg["words"], list):
+                    words.extend(seg["words"])
+                else:
+                    # Synthesize approximate word timestamps from segment
+                    text_words = seg.get("text", "").split()
+                    if text_words:
+                        st = float(seg.get("start", 0.0))
+                        en = float(seg.get("end", st + 1.0))
+                        dur = max(0.1, en - st) / len(text_words)
+                        for i, w_str in enumerate(text_words):
+                            w_st = round(st + i * dur, 2)
+                            words.append({
+                                "word": w_str,
+                                "start": w_st,
+                                "end": round(w_st + dur, 2),
+                                "probability": 1.0,
+                            })
+
+        # If we have words but segments are empty (e.g. YouTube API transcript), group words into phrases
+        if words and not segments:
+            cur_seg_words = []
+            cur_seg_st = None
+            for w in words:
+                w_st = float(w.get("start", 0.0))
+                w_en = float(w.get("end", w_st + 0.3))
+                if cur_seg_st is None:
+                    cur_seg_st = w_st
+
+                cur_seg_words.append(w.get("word", ""))
+                # Break segment on pause > 1.2s or after 12 words
+                if len(cur_seg_words) >= 12 or (len(cur_seg_words) > 3 and w.get("word", "").endswith((".", "!", "؟", "?"))):
+                    segments.append({
+                        "start": round(cur_seg_st, 2),
+                        "end": round(w_en, 2),
+                        "text": " ".join(cur_seg_words).strip(),
+                    })
+                    cur_seg_words = []
+                    cur_seg_st = None
+
+            if cur_seg_words:
+                segments.append({
+                    "start": round(cur_seg_st or 0.0, 2),
+                    "end": round(float(words[-1].get("end", (cur_seg_st or 0.0) + 1.0)), 2),
+                    "text": " ".join(cur_seg_words).strip(),
+                })
+
+        print(f"[+] Loaded pre-computed transcript: {len(segments)} segments, {len(words)} words (Language: {language}).", flush=True)
+        return segments, words, language
+
     def analyze(
         self,
-        audio_path: Path,
-        total_duration: float,
+        audio_path: Optional[Path] = None,
+        total_duration: float = 0.0,
         language: Optional[str] = None,
+        precomputed_transcript_path: Optional[Path] = None,
     ) -> Dict[str, Any]:
         """
         Transcribes and analyzes hostility, speech acceleration, and conflict lexicon.
+        If precomputed_transcript_path is provided, skips Whisper model execution completely!
         Returns:
         - "scores": List[float] per-second hostility scores (0-100)
         - "segments": List[Dict] with timestamps and text
@@ -153,7 +235,13 @@ class TranscriptAnalyzer:
         - "wps": List[float] words-per-second per second
         - "language": detected language code
         """
-        segments, words, detected_lang = self.transcribe_audio(audio_path, language=language)
+        if precomputed_transcript_path is not None and Path(precomputed_transcript_path).is_file():
+            segments, words, detected_lang = self.load_transcript_file(Path(precomputed_transcript_path))
+        else:
+            if audio_path is None:
+                raise ValueError("Either audio_path or precomputed_transcript_path must be provided.")
+            segments, words, detected_lang = self.transcribe_audio(audio_path, language=language)
+
         hostility_data = self.analyze_hostility(words, segments, total_duration)
         return {
             "scores": hostility_data["scores"],
