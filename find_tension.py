@@ -5,9 +5,9 @@ Detects arguments, shouting, interruptions, gavel banging, and heated debates
 from long video files using a multi-signal scoring engine.
 
 Architecture:
-1. Acoustic Intensity & Vocal Strain (35% weight): RMS volume, Spectral Centroid, Spectral Flux.
-2. Overlapping Speech & Interruptions (40% weight): Pyannote neural OSD or Harmonic Dispersion fallback.
-3. Transcript Sentiment & Hostility (25% weight): Faster-Whisper WPS acceleration, multilingual conflict lexicon.
+1. Acoustic Intensity & Vocal Strain (Primary Signal - 50% default weight): RMS volume, Spectral Centroid, Spectral Flux.
+2. Overlapping Speech & Interruptions (30% default weight): Pyannote neural OSD or Harmonic Dispersion fallback.
+3. Transcript Sentiment & Hostility (20% default weight): Faster-Whisper WPS acceleration, multilingual conflict lexicon.
 4. Scene Cutting: Merges outbursts within 8s, adds 4s lead-in / 3s lead-out context padding,
    and rapidly slices clips via FFmpeg.
 """
@@ -47,6 +47,24 @@ def parse_args():
         type=str,
         default="output_tension",
         help="Directory to save exported clips, timestamps.json report, and timeline plot",
+    )
+    parser.add_argument(
+        "--weight-acoustic",
+        type=float,
+        default=0.50,
+        help="Weight for Acoustic Intensity & Vocal Strain (default: 0.50 / 50%%)",
+    )
+    parser.add_argument(
+        "--weight-overlap",
+        type=float,
+        default=0.30,
+        help="Weight for Overlapping Speech & Interruptions (default: 0.30 / 30%%)",
+    )
+    parser.add_argument(
+        "--weight-hostility",
+        type=float,
+        default=0.20,
+        help="Weight for Transcript Sentiment & Speech Rate (default: 0.20 / 20%%)",
     )
     parser.add_argument(
         "--threshold", "-t",
@@ -138,11 +156,11 @@ def format_seconds(seconds: float) -> str:
     return f"{mins:02d}:{rem:02d}"
 
 
-def print_banner():
-    banner = """
+def print_banner(w_ac: float = 0.50, w_ov: float = 0.30, w_st: float = 0.20):
+    banner = f"""
 ================================================================================
    PARLIAMENTARY DEBATE HIGH-TENSION SCENE DETECTOR
-   Multi-Signal Engine: Acoustic (35%) + Overlap (40%) + Transcript (25%)
+   Multi-Signal Engine: Acoustic ({int(round(w_ac*100))}%) + Overlap ({int(round(w_ov*100))}%) + Transcript ({int(round(w_st*100))}%)
 ================================================================================
 """
     print(banner, flush=True)
@@ -150,8 +168,18 @@ def print_banner():
 
 def main():
     start_total_time = time.time()
-    print_banner()
     args = parse_args()
+
+    # Calculate and normalize weights
+    w_sum = args.weight_acoustic + args.weight_overlap + args.weight_hostility
+    if w_sum > 0:
+        w_ac = round(args.weight_acoustic / w_sum, 2)
+        w_ov = round(args.weight_overlap / w_sum, 2)
+        w_st = round(1.0 - w_ac - w_ov, 2)
+    else:
+        w_ac, w_ov, w_st = 0.50, 0.30, 0.20
+
+    print_banner(w_ac, w_ov, w_st)
 
     input_path = Path(args.input).resolve()
     if not input_path.is_file():
@@ -165,6 +193,7 @@ def main():
     print(f"[*] Input Video: {input_path}")
     print(f"[*] Output Directory: {output_dir}")
     print(f"[*] Config: Threshold={args.threshold} | MergeGap={args.merge_gap}s | Padding=(-{args.padding_before}s, +{args.padding_after}s)")
+    print(f"[*] Signal Weights: Acoustic={int(w_ac*100)}% | Overlap={int(w_ov*100)}% | Hostility={int(w_st*100)}%")
     print(f"[*] Device: {args.device} | Whisper Model: {args.whisper_model}")
 
     # Step 1: Extract Audio & Get Total Duration
@@ -177,27 +206,27 @@ def main():
     extract_audio_from_video(input_path, temp_audio_path)
     print(f"[+] 16kHz Mono Audio Extracted to: {temp_audio_path.name}")
 
-    # Step 2: Signal 1 - Acoustic Intensity & Vocal Strain (35%)
+    # Step 2: Signal 1 - Acoustic Intensity & Vocal Strain
     print("\n" + "=" * 60)
-    print("STEP 2: Analyzing Acoustic Intensity & Vocal Strain (35% weight)")
+    print(f"STEP 2: Analyzing Acoustic Intensity & Vocal Strain ({int(w_ac*100)}% weight)")
     print("=" * 60)
     acoustic_analyzer = AcousticAnalyzer(target_sr=16000)
     acoustic_res = acoustic_analyzer.analyze_audio(temp_audio_path, total_duration=total_duration)
     acoustic_scores = acoustic_res["scores"]
     print(f"[+] Acoustic analysis complete: {len(acoustic_scores)} seconds processed.")
 
-    # Step 3: Signal 2 - Overlapping Speech & Interruptions (40%)
+    # Step 3: Signal 2 - Overlapping Speech & Interruptions
     print("\n" + "=" * 60)
-    print("STEP 3: Detecting Overlapping Speech & Cross-Talk (40% weight)")
+    print(f"STEP 3: Detecting Overlapping Speech & Cross-Talk ({int(w_ov*100)}% weight)")
     print("=" * 60)
     overlap_detector = OverlapDetector(hf_token=args.hf_token, device=args.device)
     overlap_res = overlap_detector.detect_overlap(temp_audio_path, total_duration=total_duration)
     overlap_scores = overlap_res["scores"]
     print(f"[+] Overlap detection complete: Engine='{overlap_res.get('engine')}', {len(overlap_scores)} seconds processed.")
 
-    # Step 4: Signal 3 - Transcript Sentiment, Speech Rate & Hostility (25%)
+    # Step 4: Signal 3 - Transcript Sentiment, Speech Rate & Hostility
     print("\n" + "=" * 60)
-    print("STEP 4: Evaluating Lexical Hostility & Speech Rate (25% weight)")
+    print(f"STEP 4: Evaluating Lexical Hostility & Speech Rate ({int(w_st*100)}% weight)")
     print("=" * 60)
     transcript_file = None
     if args.transcript:
@@ -243,9 +272,9 @@ def main():
     print("STEP 5: Multi-Signal Fusion, Smoothing & Scene Ranking")
     print("=" * 60)
     scene_processor = SceneProcessor(
-        weight_acoustic=0.35,
-        weight_overlap=0.40,
-        weight_sentiment=0.25,
+        weight_acoustic=w_ac,
+        weight_overlap=w_ov,
+        weight_sentiment=w_st,
         default_threshold=args.threshold,
         merge_gap=args.merge_gap,
         padding_before=args.padding_before,
@@ -290,9 +319,9 @@ def main():
         "total_duration_formatted": format_seconds(total_duration),
         "threshold": args.threshold,
         "weights": {
-            "acoustic_strain": 0.35,
-            "overlapping_speech": 0.40,
-            "transcript_hostility": 0.25,
+            "acoustic_strain": w_ac,
+            "overlapping_speech": w_ov,
+            "transcript_hostility": w_st,
         },
         "padding_seconds": {
             "lead_in_before": args.padding_before,
@@ -316,6 +345,7 @@ def main():
             scenes=scenes,
             threshold=args.threshold,
             output_plot_path=plot_path,
+            weights={"acoustic": w_ac, "overlap": w_ov, "sentiment": w_st},
         )
 
     # Cleanup temporary WAV if requested

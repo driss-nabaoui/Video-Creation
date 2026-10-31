@@ -10,11 +10,11 @@ To prevent false positives caused by isolated microphone bumps, polite laughter,
 
 ```mermaid
 flowchart TD
-    WAV["Extracted 16kHz Mono Audio"] --> S1["1. Acoustic Strain (35%)\nRMS, Spectral Centroid, Spectral Flux"]
-    WAV --> S2["2. Overlapping Speech (40%)\nPyannote Neural OSD / Harmonic Dispersion"]
-    WAV --> S3["3. Transcript Hostility (25%)\nFaster-Whisper / Pre-existing Transcript"]
+    WAV["Extracted 16kHz Mono Audio"] --> S1["1. Acoustic Strain (50% Primary)\nRMS, Spectral Centroid, Spectral Flux"]
+    WAV --> S2["2. Overlapping Speech (30%)\nPyannote Neural OSD / Harmonic Dispersion"]
+    WAV --> S3["3. Transcript Hostility (20%)\nFaster-Whisper / Pre-existing Transcript"]
 
-    S1 --> Fusion["Weighted Fusion (0-100)\n0.35 * Ac + 0.40 * Ov + 0.25 * Host"]
+    S1 --> Fusion["Weighted Fusion (0-100)\n0.50 * Ac + 0.30 * Ov + 0.20 * Host"]
     S2 --> Fusion
     S3 --> Fusion
 
@@ -27,7 +27,7 @@ flowchart TD
 
 ---
 
-### 1. Acoustic Intensity & Vocal Strain (35% Weight)
+### 1. Acoustic Intensity & Vocal Strain (50% Primary Weight)
 - **Module**: [`acoustic_analyzer.py`](acoustic_analyzer.py)
 - **Features Extracted via Librosa**:
   - **RMS Energy**: Measures physical volume spikes and shouting power.
@@ -39,7 +39,7 @@ flowchart TD
 
 ---
 
-### 2. Overlapping Speech & Interruptions (40% Weight)
+### 2. Overlapping Speech & Interruptions (30% Weight)
 - **Module**: [`overlap_detector.py`](overlap_detector.py)
 - In parliamentary protocol, civil debate consists of one speaker at a time; high tension is marked by cross-talk, cross-shouting, and rapid interruptions.
 - **Dual-Engine Design**:
@@ -51,7 +51,7 @@ flowchart TD
 
 ---
 
-### 3. Transcript Sentiment, Speech Rate & Hostility (25% Weight)
+### 3. Transcript Sentiment, Speech Rate & Hostility (20% Weight)
 - **Module**: [`transcript_analyzer.py`](transcript_analyzer.py)
 - **Inputs**:
   - **Pre-computed Transcripts**: Ingests existing JSON files (`words` and `segments` from YouTube API or earlier Whisper runs) in milliseconds.
@@ -97,7 +97,7 @@ flowchart TD
 | [`acoustic_analyzer.py`](acoustic_analyzer.py) | `AcousticAnalyzer` | Extracts RMS, Centroid, and Flux features; normalizes with Z-scores. |
 | [`overlap_detector.py`](overlap_detector.py) | `OverlapDetector` | Dual-engine overlap detection (Pyannote model or acoustic fallback). |
 | [`transcript_analyzer.py`](transcript_analyzer.py) | `TranscriptAnalyzer` | Transcribes audio or ingests pre-computed JSON; calculates WPS and hostility. |
-| [`scene_processor.py`](scene_processor.py) | `SceneProcessor` | Signal fusion ($0.35 + 0.40 + 0.25$), smoothing, 8s merging, and context padding. |
+| [`scene_processor.py`](scene_processor.py) | `SceneProcessor` | Signal fusion ($0.50 + 0.30 + 0.20$), smoothing, 8s merging, and context padding. |
 | [`video_cutter.py`](video_cutter.py) | `VideoCutter` | Slices video clips via FFmpeg, exports `timestamps.json`, and plots `tension_timeline.png`. |
 
 ---
@@ -121,13 +121,13 @@ video_path = Path("debate.mp4")
 temp_wav = Path("output/audio_16k.wav")
 total_duration = extract_audio_from_video(video_path, temp_wav)[1]
 
-# 1. Acoustic Intensity (35%)
+# 1. Acoustic Intensity (50% Primary Weight)
 ac_scores = AcousticAnalyzer().analyze_audio(temp_wav, total_duration)["scores"]
 
-# 2. Overlap & Interruptions (40%)
+# 2. Overlap & Interruptions (30% Weight)
 ov_scores = OverlapDetector().detect_overlap(temp_wav, total_duration)["scores"]
 
-# 3. Transcript Hostility (25%)
+# 3. Transcript Hostility (20% Weight)
 tr_data = TranscriptAnalyzer().analyze(
     precomputed_transcript_path=Path("transcripts/debate_transcript.json"),
     total_duration=total_duration,
@@ -136,9 +136,9 @@ tr_scores = tr_data["scores"]
 
 # 4. Multi-Signal Fusion & Scene Merging
 processor = SceneProcessor(
-    weight_acoustic=0.35,
-    weight_overlap=0.40,
-    weight_sentiment=0.25,
+    weight_acoustic=0.50,
+    weight_overlap=0.30,
+    weight_sentiment=0.20,
     default_threshold=60.0,
     merge_gap=8.0,
     padding_before=4.0,

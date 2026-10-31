@@ -1,6 +1,6 @@
 """
 Scene Processor: Multi-Signal Fusion, Temporal Smoothing, Spike Merging & Context Padding.
-Combines Acoustic (35%) + Overlap (40%) + Hostility (25%) into a unified 0-100 tension score.
+Combines Acoustic Strain (50%) + Overlap (30%) + Hostility (20%) into a unified 0-100 tension score.
 """
 
 from typing import Dict, Any, List, Optional
@@ -16,9 +16,9 @@ class SceneProcessor:
 
     def __init__(
         self,
-        weight_acoustic: float = 0.35,
-        weight_overlap: float = 0.40,
-        weight_sentiment: float = 0.25,
+        weight_acoustic: float = 0.50,
+        weight_overlap: float = 0.30,
+        weight_sentiment: float = 0.20,
         default_threshold: float = 60.0,
         merge_gap: float = 8.0,
         padding_before: float = 4.0,

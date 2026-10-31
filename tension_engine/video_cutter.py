@@ -197,12 +197,13 @@ class VideoCutter:
         scenes: List[Dict[str, Any]],
         threshold: float,
         output_plot_path: Path,
+        weights: Optional[Dict[str, float]] = None,
     ) -> Optional[Path]:
         """
         Generates a 4-panel multi-signal timeline plot showing:
-        1. Acoustic Strain & Energy (35%)
-        2. Overlapping Speech & Interruption (40%)
-        3. Transcript Sentiment & Hostility (25%)
+        1. Acoustic Strain & Energy
+        2. Overlapping Speech & Interruption
+        3. Transcript Sentiment & Hostility
         4. Unified Smoothed Tension Score (0-100) with highlighted scene spans.
         """
         try:
@@ -228,11 +229,16 @@ class VideoCutter:
             st = pad_sig(sentiment_scores, n_sec)
             sm = pad_sig(smoothed_scores, n_sec)
 
+            w = weights or {"acoustic": 0.50, "overlap": 0.30, "sentiment": 0.20}
+            w_ac = int(round(w.get("acoustic", 0.50) * 100))
+            w_ov = int(round(w.get("overlap", 0.30) * 100))
+            w_st = int(round(w.get("sentiment", 0.20) * 100))
+
             fig, axes = plt.subplots(4, 1, figsize=(16, 10), sharex=True)
             plt.subplots_adjust(hspace=0.25)
 
             # Panel 1: Acoustic
-            axes[0].plot(time_axis, ac, color="#ff9800", linewidth=1.2, label="Acoustic Strain (35% weight)")
+            axes[0].plot(time_axis, ac, color="#ff9800", linewidth=1.2, label=f"Acoustic Strain ({w_ac}% weight)")
             axes[0].fill_between(time_axis, ac, color="#ff9800", alpha=0.2)
             axes[0].set_ylabel("Acoustic (0-100)", fontsize=10, fontweight="bold")
             axes[0].set_ylim(-2, 105)
@@ -241,7 +247,7 @@ class VideoCutter:
             axes[0].set_title("Multi-Signal Tension Detection Timeline", fontsize=14, fontweight="bold")
 
             # Panel 2: Overlap
-            axes[1].plot(time_axis, ov, color="#00bcd4", linewidth=1.2, label="Overlap & Cross-Talk (40% weight)")
+            axes[1].plot(time_axis, ov, color="#00bcd4", linewidth=1.2, label=f"Overlap & Cross-Talk ({w_ov}% weight)")
             axes[1].fill_between(time_axis, ov, color="#00bcd4", alpha=0.2)
             axes[1].set_ylabel("Overlap (0-100)", fontsize=10, fontweight="bold")
             axes[1].set_ylim(-2, 105)
@@ -249,7 +255,7 @@ class VideoCutter:
             axes[1].legend(loc="upper right", framealpha=0.8)
 
             # Panel 3: Hostility
-            axes[2].plot(time_axis, st, color="#9c27b0", linewidth=1.2, label="Lexical Hostility & Rate (25% weight)")
+            axes[2].plot(time_axis, st, color="#9c27b0", linewidth=1.2, label=f"Lexical Hostility & Rate ({w_st}% weight)")
             axes[2].fill_between(time_axis, st, color="#9c27b0", alpha=0.2)
             axes[2].set_ylabel("Hostility (0-100)", fontsize=10, fontweight="bold")
             axes[2].set_ylim(-2, 105)

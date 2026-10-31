@@ -7,7 +7,7 @@ An end-to-end toolkit to transcribe long-form videos, detect clean background ne
 ## ⚡ Highlights
 
 - **Hardware Acceleration**: NVIDIA NVENC + CUDA (`h264_nvenc`) encoding & decoding (~**3.4x faster**, rendering transitions at **218+ FPS**), with automatic CPU fallback.
-- **High-Tension Scene Detector (`find_tension.py`)**: Automated parliamentary & debate analyzer detecting shouting, gavel bangs, cross-talk, and hostility via multi-signal fusion (Acoustic 35% + Overlap 40% + Hostility 25%), exporting ranked video clips and timestamps.
+- **High-Tension Scene Detector (`find_tension.py`)**: Automated parliamentary & debate analyzer detecting shouting, gavel bangs, cross-talk, and hostility via multi-signal fusion (Acoustic 50% + Overlap 30% + Hostility 20%), exporting ranked video clips and timestamps.
 - **Teaser Video Generator (`build_intro_video.py`)**: Cuts soundbites, applies dynamic typography, and stitches scenes with smooth transitions from a simple `clips.json`.
 - **Broadcast Editorial Themes**: `urgent_red`, `suspense_amber`, `investigative_blue`, `highlight_gold`, `floating_karaoke`, `glassmorphic`, `stacked_kinetic`.
 - **RTL Arabic Stability**: Zero word jumping or permutation using bidirectional Unicode LRM isolation and native ligature shaping (Cairo, Readex Pro).
