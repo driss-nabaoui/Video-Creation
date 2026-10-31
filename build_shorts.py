@@ -176,8 +176,10 @@ def build_shorts(
     base_project_dir = Path(output_dir_override) if output_dir_override else Path("projects") / project_id
     raw_clips_dir = base_project_dir / "clips"
     shorts_dir = base_project_dir / "shorts"
+    subs_dir = shorts_dir / "subtitles"
     raw_clips_dir.mkdir(parents=True, exist_ok=True)
     shorts_dir.mkdir(parents=True, exist_ok=True)
+    subs_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolution & Framing options
     quality_key = (quality_override or settings.get("quality", "720p")).lower()
@@ -227,7 +229,7 @@ def build_shorts(
 
         raw_clip = raw_clips_dir / f"{clip_id}_raw.mp4"
         short_clip = shorts_dir / f"{clip_id}.mp4"
-        ass_file = shorts_dir / f"{clip_id}_916.ass"
+        ass_file = subs_dir / f"{clip_id}_916.ass"
 
         print(f"[*] Processing [{clip_id}]: {start:.1f}s -> {end:.1f}s ({duration:.1f}s)", flush=True)
 

@@ -285,6 +285,20 @@ def extract_hook_banner_text(title: str) -> Optional[str]:
     return None
 
 
+def normalize_font_family(font: Optional[str]) -> str:
+    """
+    Normalizes font names so libass and fontconfig cleanly resolve the font family.
+    E.g., 'Cairo-Bold' or 'Cairo Bold' -> 'Cairo'.
+    """
+    if not font:
+        return "Cairo"
+    font = font.strip()
+    for suffix in ("-Bold", " Bold", "-Regular", " Regular", "-SemiBold", " SemiBold", "-Black", " Black", "-Light", " Light", "-Medium", " Medium"):
+        if font.endswith(suffix):
+            return font[:-len(suffix)].strip()
+    return font
+
+
 def build_dynamic_ass(
     words: List[Dict[str, Any]],
     output_ass_path: Path,
@@ -308,7 +322,7 @@ def build_dynamic_ass(
     and persistent top hook banners.
     """
     style_cfg = THEMES.get(theme, THEMES["floating_karaoke"])
-    font_name = font or style_cfg.get("font", "Cairo")
+    font_name = normalize_font_family(font or style_cfg.get("font", "Cairo"))
     active_color = highlight_color or style_cfg.get("highlight_color", "&H0000D7FF&")
     primary_color = style_cfg.get("text_color", "&H00FFFFFF&")
     is_karaoke = style_cfg.get("karaoke", False)
