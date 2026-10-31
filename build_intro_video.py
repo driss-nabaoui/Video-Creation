@@ -201,12 +201,11 @@ def get_clip_words_with_timing(
 
 
 def cut_raw_clip(src_video: str, start: float, duration: float, out_path: Path):
-    """Cut clean raw video clip from source file, using GPU (NVENC/CUDA) when available."""
+    """Cut clean raw video clip from source file, using fast demuxer seeking and GPU (NVENC) encoding."""
     if has_nvenc():
         try:
             cmd = [
                 "ffmpeg", "-y",
-                "-hwaccel", "cuda",
                 "-ss", str(start),
                 "-i", str(src_video),
                 "-t", str(duration),
