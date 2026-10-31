@@ -33,6 +33,8 @@ ENV/
 projects/
 transcripts/
 models/
+output_tension/
+test_output_tension*/
 
 # Local configuration overrides (template provided in clips.example.json)
 clips.json

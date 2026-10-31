@@ -7,6 +7,7 @@ An end-to-end toolkit to transcribe long-form videos, detect clean background ne
 ## ⚡ Highlights
 
 - **Hardware Acceleration**: NVIDIA NVENC + CUDA (`h264_nvenc`) encoding & decoding (~**3.4x faster**, rendering transitions at **218+ FPS**), with automatic CPU fallback.
+- **High-Tension Scene Detector (`find_tension.py`)**: Automated parliamentary & debate analyzer detecting shouting, gavel bangs, cross-talk, and hostility via multi-signal fusion (Acoustic 35% + Overlap 40% + Hostility 25%), exporting ranked video clips and timestamps.
 - **Teaser Video Generator (`build_intro_video.py`)**: Cuts soundbites, applies dynamic typography, and stitches scenes with smooth transitions from a simple `clips.json`.
 - **Broadcast Editorial Themes**: `urgent_red`, `suspense_amber`, `investigative_blue`, `highlight_gold`, `floating_karaoke`, `glassmorphic`, `stacked_kinetic`.
 - **RTL Arabic Stability**: Zero word jumping or permutation using bidirectional Unicode LRM isolation and native ligature shaping (Cairo, Readex Pro).
@@ -18,7 +19,16 @@ An end-to-end toolkit to transcribe long-form videos, detect clean background ne
 
 ## 🚀 Quick Start
 
-### 1. Build an Intro / Teaser Video (GPU Accelerated)
+### 1. Detect High-Tension Parliamentary Debate Scenes
+```bash
+# Analyze full parliamentary video and export ranked tension clips + timestamps.json
+python find_tension.py --input debate_video.mp4 --threshold 60.0
+
+# Optional flags (lossless cutting, custom padding, HuggingFace Pyannote token):
+python find_tension.py --input debate_video.mp4 --threshold 55.0 --padding-before 4.0 --padding-after 3.0 --merge-gap 8.0 --lossless
+```
+
+### 2. Build an Intro / Teaser Video (GPU Accelerated)
 Configure your soundbites in `clips.json` and build the final teaser:
 
 ```bash
@@ -29,7 +39,7 @@ python build_intro_video.py clips.json
 python build_intro_video.py clips.json --font "Cairo" --style urgent_red --quality 1080p
 ```
 
-### 2. Transcription with Word Timestamps
+### 3. Transcription with Word Timestamps
 ```bash
 # Instant transcript from YouTube URL (3 seconds)
 python youtube_api.py "https://www.youtube.com/watch?v=VIDEO_ID"
@@ -38,13 +48,13 @@ python youtube_api.py "https://www.youtube.com/watch?v=VIDEO_ID"
 python transcribe.py "video.mp4" --model base
 ```
 
-### 3. Live Robust Video Matting (RVM) Preview
+### 4. Live Robust Video Matting (RVM) Preview
 ```bash
 # Interactive live preview with depth-layered typography
 python rvm_matting_live.py "video.mp4" --text "عنوان المشهد"
 ```
 
-### 4. Interactive Empty Space Detector
+### 5. Interactive Empty Space Detector
 ```bash
 # Live preview of speaker segmentation and empty background space
 python detect_empty_space.py "video.mp4" --quality medium
@@ -100,6 +110,8 @@ python detect_empty_space.py "video.mp4" --quality medium
 
 ## 📁 Repository Structure
 
+- [`find_tension.py`](find_tension.py) - CLI pipeline for parliamentary debate tension detection, scene ranking, and cutting.
+- [`tension_engine/`](tension_engine/) - Modular multi-signal tension engine (acoustic strain, overlap detection, transcript hostility, scene merging, fast video slicing).
 - [`build_intro_video.py`](build_intro_video.py) - Master teaser builder (cutting, ASS styling, transition merging with NVENC).
 - [`dynamic_captions.py`](dynamic_captions.py) - ASS subtitle generator with Arabic RTL stabilization & karaoke animation.
 - [`detect_empty_space.py`](detect_empty_space.py) - MediaPipe human segmentation & Largest Empty Rectangle (LER) analyzer.
