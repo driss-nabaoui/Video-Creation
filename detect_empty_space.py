@@ -316,6 +316,97 @@ class EmptySpaceDetector:
         }
 
 
+def get_speaker_crop_x(
+    video_path: Path,
+    start_time: float,
+    end_time: float,
+    sample_frames: int = 6,
+    detector: Optional[EmptySpaceDetector] = None,
+) -> int:
+    """
+    Samples frames across [start_time, end_time] using MediaPipe person segmentation
+    to determine the optimal horizontal center X coordinate for 9:16 vertical cropping.
+    Falls back to frame_width // 2 if no person is detected.
+    """
+    video_path = Path(video_path).resolve()
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return 1920 // 2
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1920
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    st_frame = max(0, int(start_time * fps))
+    en_frame = min(total_frames - 1, int(end_time * fps)) if total_frames > 0 else st_frame + int(fps * 2)
+    if en_frame <= st_frame:
+        en_frame = st_frame + int(fps * 2)
+
+    det = detector or EmptySpaceDetector(quality="medium")
+    step = max(1, (en_frame - st_frame) // (sample_frames + 1))
+    sample_indices = [st_frame + step * (i + 1) for i in range(sample_frames)]
+
+    speaker_xs = []
+
+    for f_idx in sample_indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+        ret, frame = cap.read()
+        if ret and frame is not None:
+            res = det.process_frame(frame)
+            mask = res.get("person_mask")
+            if mask is not None:
+                ys, xs = np.where(mask > 0)
+                if len(xs) > 50:  # Valid person detection
+                    speaker_xs.append(float(np.median(xs)))
+
+    cap.release()
+
+    if speaker_xs:
+        # Use median of frame medians for high stability against brief head turns
+        return int(round(np.median(speaker_xs)))
+    return w // 2
+
+
+def generate_916_crop_filter(
+    src_w: int,
+    src_h: int,
+    target_w: int = 720,
+    target_h: int = 1280,
+    center_x: Optional[int] = None,
+    mode: str = "speaker_track",
+) -> str:
+    """
+    Generates an FFmpeg video filter chain to convert 16:9 horizontal footage to 9:16 vertical.
+    Supported modes:
+    - "speaker_track": Crops 9:16 window centered on speaker's X position.
+    - "blur_pad": Fits 16:9 clip in center over a blurred 9:16 background copy.
+    - "center": Center crops 16:9 to 9:16.
+    """
+    crop_w = int(round(src_h * 9.0 / 16.0))
+    if crop_w % 2 != 0:
+        crop_w -= 1
+
+    if mode == "blur_pad":
+        return (
+            f"split[fg_raw][bg_raw];"
+            f"[bg_raw]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=25:5,colorchannelmixer=aa=0.75[bg_blur];"
+            f"[fg_raw]scale={target_w}:-2[fg_fit];"
+            f"[bg_blur][fg_fit]overlay=(W-w)/2:(H-h)/2,setsar=1"
+        )
+
+    if mode == "center" or center_x is None:
+        cx = src_w // 2
+    else:
+        cx = center_x
+
+    min_x = 0
+    max_x = max(0, src_w - crop_w)
+    crop_x = max(min_x, min(max_x, int(round(cx - crop_w / 2.0))))
+
+    return f"crop={crop_w}:{src_h}:{crop_x}:0,scale={target_w}:{target_h},setsar=1"
+
+
 class LivePreviewRenderer:
     """Handles rendering of overlays, person highlights, clean empty box, and telemetry HUD."""
 

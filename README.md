@@ -8,6 +8,7 @@ An end-to-end toolkit to transcribe long-form videos, detect clean background ne
 
 - **Hardware Acceleration**: NVIDIA NVENC + CUDA (`h264_nvenc`) encoding & decoding (~**3.4x faster**, rendering transitions at **218+ FPS**), with automatic CPU fallback.
 - **High-Tension Scene Detector (`find_tension.py`)**: Automated parliamentary & debate analyzer detecting shouting, gavel bangs, cross-talk, and hostility via multi-signal fusion (Acoustic 50% + Overlap 30% + Hostility 20%), exporting ranked video clips and timestamps.
+- **Vertical 9:16 Shorts Pipeline (`build_shorts.py`)**: Automated TikTok/Reels/Shorts generator using MediaPipe speaker tracking, mobile safe-zone RTL captions, and top hook banners (batch or stitched).
 - **Teaser Video Generator (`build_intro_video.py`)**: Cuts soundbites, applies dynamic typography, and stitches scenes with smooth transitions from a simple `clips.json`.
 - **Broadcast Editorial Themes**: `urgent_red`, `suspense_amber`, `investigative_blue`, `highlight_gold`, `floating_karaoke`, `glassmorphic`, `stacked_kinetic`.
 - **RTL Arabic Stability**: Zero word jumping or permutation using bidirectional Unicode LRM isolation and native ligature shaping (Cairo, Readex Pro).
@@ -31,7 +32,7 @@ python find_tension.py --input debate_video.mp4 --transcript projects/teaser/tra
 python find_tension.py --input debate_video.mp4 --threshold 55.0 --padding-before 4.0 --padding-after 3.0 --merge-gap 8.0 --lossless
 ```
 
-### 2. Build an Intro / Teaser Video (GPU Accelerated)
+### 2. Build an Intro / Teaser Video (GPU Accelerated - 16:9)
 Configure your soundbites in `clips.json` and build the final teaser:
 
 ```bash
@@ -42,7 +43,21 @@ python build_intro_video.py clips.json
 python build_intro_video.py clips.json --font "Cairo" --style urgent_red --quality 1080p
 ```
 
-### 3. Transcription with Word Timestamps
+### 3. Generate Vertical 9:16 Shorts (TikTok / Reels / YouTube Shorts)
+Generate vertical mobile videos from the same `clips.json` with speaker-centered tracking and top hook banners:
+
+```bash
+# Export every clip in clips.json as an individual standalone 9:16 Short (Default)
+python build_shorts.py clips.json
+
+# Export all clips stitched together with transitions into ONE vertical reel:
+python build_shorts.py clips.json --stitched
+
+# Optional framing & style overrides:
+python build_shorts.py clips.json --crop-mode speaker_track --quality 720p --style urgent_red --words-per-screen 3
+```
+
+### 4. Transcription with Word Timestamps
 ```bash
 # Instant transcript from YouTube URL (3 seconds)
 python youtube_api.py "https://www.youtube.com/watch?v=VIDEO_ID"
@@ -51,13 +66,13 @@ python youtube_api.py "https://www.youtube.com/watch?v=VIDEO_ID"
 python transcribe.py "video.mp4" --model base
 ```
 
-### 4. Live Robust Video Matting (RVM) Preview
+### 5. Live Robust Video Matting (RVM) Preview
 ```bash
 # Interactive live preview with depth-layered typography
 python rvm_matting_live.py "video.mp4" --text "عنوان المشهد"
 ```
 
-### 5. Interactive Empty Space Detector
+### 6. Interactive Empty Space Detector
 ```bash
 # Live preview of speaker segmentation and empty background space
 python detect_empty_space.py "video.mp4" --quality medium
@@ -113,6 +128,7 @@ python detect_empty_space.py "video.mp4" --quality medium
 
 ## 📁 Repository Structure
 
+- [`build_shorts.py`](build_shorts.py) - Automated 9:16 vertical Shorts pipeline (speaker tracking, safe-zone captions, hook banners, batch/stitched).
 - [`find_tension.py`](find_tension.py) - CLI pipeline for parliamentary debate tension detection, scene ranking, and cutting.
 - [`tension_engine/`](tension_engine/) - Modular multi-signal tension engine (acoustic strain, overlap detection, transcript hostility, scene merging, fast video slicing).
 - [`build_intro_video.py`](build_intro_video.py) - Master teaser builder (cutting, ASS styling, transition merging with NVENC).

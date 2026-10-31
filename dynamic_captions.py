@@ -13,6 +13,7 @@ Features:
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -252,6 +253,38 @@ def chunk_words_by_phrase(
     return chunks
 
 
+def extract_hook_banner_text(title: str) -> Optional[str]:
+    """
+    Extracts a concise, high-impact hook banner phrase from a clip title or soundbite label.
+    Supports bracketed text [خطاف البداية - الوزير], colon/pipe separators, or clean concise titles.
+    """
+    if not title:
+        return None
+    # 1. Check for bracketed tags: [خطاف البداية - الوزير]
+    match = re.search(r"\[(.*?)\]", title)
+    if match:
+        candidate = match.group(1).strip()
+        if candidate:
+            return candidate
+
+    # 2. Check for pipe, dash, or colon separators
+    for sep in ("|", "—", "–", ":"):
+        if sep in title:
+            parts = [p.strip() for p in title.split(sep) if p.strip()]
+            for p in parts:
+                # Skip generic numbering like "المشهد 1" or "Scene 1"
+                if re.match(r"^(المشهد\s*\d+|clip\s*\d+|scene\s*\d+)$", p, re.IGNORECASE):
+                    continue
+                if 4 <= len(p) <= 65:
+                    return p
+
+    # 3. If title is concise, use it directly
+    clean_title = title.strip()
+    if 4 <= len(clean_title) <= 55:
+        return clean_title
+    return None
+
+
 def build_dynamic_ass(
     words: List[Dict[str, Any]],
     output_ass_path: Path,
@@ -264,10 +297,15 @@ def build_dynamic_ass(
     header_badge: Optional[str] = None,
     font: Optional[str] = None,
     highlight_color: Optional[str] = None,
+    aspect_ratio: str = "16:9",
+    target_resolution: Optional[Tuple[int, int]] = None,
+    hook_banner: Optional[str] = None,
+    hook_duration: Optional[float] = None,
 ) -> Path:
     """
     Builds an ASS subtitle file supporting Floating Karaoke, Stacked Kinetic Blocks,
-    Glassmorphic Pill, and empty space coordinate injection.
+    Glassmorphic Pill, empty space coordinate injection, 9:16 vertical mobile layout,
+    and persistent top hook banners.
     """
     style_cfg = THEMES.get(theme, THEMES["floating_karaoke"])
     font_name = font or style_cfg.get("font", "Cairo")
@@ -276,15 +314,27 @@ def build_dynamic_ass(
     is_karaoke = style_cfg.get("karaoke", False)
     is_stacked = style_cfg.get("stacked", False)
 
+    # 1. Resolve canvas dimensions (16:9 vs 9:16)
+    is_916 = (aspect_ratio == "9:16")
+    if target_resolution:
+        res_x, res_y = target_resolution
+    elif is_916:
+        res_x, res_y = (720, 1280)
+    else:
+        res_x, res_y = (1280, 720)
+
+    # 2. In 9:16 vertical mode, default words_per_screen to 3 to prevent line wrapping
+    effective_words = words_per_screen
+    if is_916 and words_per_screen == 5:
+        effective_words = 3
+
     # Base alignment & positioning
     pos_tag = ""
     alignment = 2
-    margin_v = 75
 
     if target_box:
         # Place directly inside the detected empty space bounding box
         bx, by, bw, bh = target_box
-        # Use center of the detected empty space
         cx = bx + bw // 2
         cy = by + bh // 2
         alignment = 5  # Center alignment
@@ -296,34 +346,54 @@ def build_dynamic_ass(
             margin_v = 0
         elif position == "top":
             alignment = 8
-            margin_v = 50
+            margin_v = int(res_y * 0.08) if is_916 else 50
         elif position == "left":
             alignment = 4
-            pos_tag = "{\\an4\\pos(120,360)}"
+            pos_x = int(res_x * 0.09)
+            pos_y = res_y // 2
+            pos_tag = f"{{\\an4\\pos({pos_x},{pos_y})}}"
         elif position == "right":
             alignment = 6
-            pos_tag = "{\\an6\\pos(1160,360)}"
+            pos_x = int(res_x * 0.91)
+            pos_y = res_y // 2
+            pos_tag = f"{{\\an6\\pos({pos_x},{pos_y})}}"
         else:  # default bottom
             alignment = 2
-            margin_v = 75
+            # For 9:16 vertical, keep subtitles safely above the TikTok/Reels UI (bottom ~24%)
+            margin_v = int(res_y * 0.24) if is_916 else 75
 
     shadow_val = style_cfg.get("shadow", 0)
     blur_tag = "\\blur3" if shadow_val > 0 else ""
 
+    # Adjust font size for vertical screens if needed
+    base_fontsize = style_cfg["fontsize"]
+    fontsize = base_fontsize if not is_916 else max(38, int(base_fontsize * (res_x / 1280.0) * 1.25))
+
     ass_lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
-        "PlayResX: 1280",
-        "PlayResY: 720",
+        f"PlayResX: {res_x}",
+        f"PlayResY: {res_y}",
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        f"Style: DynamicWord,{font_name},{style_cfg['fontsize']},{primary_color},&H000000FF,{style_cfg['box_color']},{style_cfg['box_color']},-1,0,0,0,100,100,0,0,{style_cfg['border_style']},{style_cfg['outline']},{shadow_val},{alignment},30,30,{margin_v},1",
+        f"Style: DynamicWord,{font_name},{fontsize},{primary_color},&H000000FF,{style_cfg['box_color']},{style_cfg['box_color']},-1,0,0,0,100,100,0,0,{style_cfg['border_style']},{style_cfg['outline']},{shadow_val},{alignment},30,30,{margin_v},1",
     ]
 
     if header_badge:
         ass_lines.append(
             f"Style: HeaderBadge,{font_name},28,&H0000D7FF,&H000000FF,&HA0101010,&HA0101010,-1,0,0,0,100,100,0,0,3,10,0,8,40,40,25,1"
+        )
+
+    # Top Hook Banner Style (Top Safe Zone, Alignment 8)
+    if hook_banner:
+        hook_fontsize = 32 if is_916 else 28
+        hook_margin_v = int(res_y * 0.08) if is_916 else 25
+        hook_box_color = style_cfg.get("box_color", "&HA0101010&")
+        if hook_box_color == "&H00000000&":
+            hook_box_color = "&HB0141414&"
+        ass_lines.append(
+            f"Style: HookBanner,{font_name},{hook_fontsize},&H00FFFFFF&,&H000000FF,{hook_box_color},{hook_box_color},-1,0,0,0,100,100,0,0,3,14,0,8,40,40,{hook_margin_v},1"
         )
 
     ass_lines.extend([
@@ -332,10 +402,20 @@ def build_dynamic_ass(
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ])
 
-    # Optional top header badge
+    # Optional top header badge (legacy)
     if header_badge and max_duration:
         ass_lines.append(
             f"Dialogue: 0,0:00:00.00,{to_ass_timestamp(max_duration)},HeaderBadge,,0,0,0,,{header_badge}"
+        )
+
+    # Top Hook Banner Event (Emits in single pass)
+    if hook_banner and max_duration:
+        hook_end_sec = hook_duration if hook_duration is not None else max_duration
+        hook_text = hook_banner.strip()
+        if is_arabic(hook_text):
+            hook_text = f"\u200F{hook_text}\u200F"
+        ass_lines.append(
+            f"Dialogue: 0,0:00:00.00,{to_ass_timestamp(hook_end_sec)},HookBanner,,0,0,0,,{hook_text}"
         )
 
     clean_words = []
@@ -354,15 +434,15 @@ def build_dynamic_ass(
         output_ass_path.write_text("\n".join(ass_lines), encoding="utf-8")
         return output_ass_path
 
-    # Group words into natural phrases (4-6 words for horizontal, 2-3 for stacked)
+    # Group words into natural phrases (3-4 words for vertical, 4-6 for horizontal, 2-3 for stacked)
     if is_stacked:
-        chunk_size = 3
+        chunk_size = 2 if is_916 else 3
         chunks = [clean_words[i : i + chunk_size] for i in range(0, len(clean_words), chunk_size)]
     else:
         chunks = chunk_words_by_phrase(
             clean_words,
-            target_words=words_per_screen,
-            max_words=max(words_per_screen + 2, 7),
+            target_words=effective_words,
+            max_words=max(effective_words + 2, 5 if is_916 else 7),
         )
 
     for chunk_idx, chunk in enumerate(chunks):
